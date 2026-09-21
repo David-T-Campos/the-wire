@@ -91,7 +91,7 @@ body {
     position: absolute; left: 50%; transform: translateX(-50%); bottom: 86px; z-index: 3;
     display: none; align-items: center; gap: 6px;
     background: #ff4040; color: #14060b; font-size: 12.5px; font-weight: 800; letter-spacing: 0.04em;
-    border: none; border-radius: 999px; padding: 9px 16px; cursor: pointer; font-family: inherit;
+    border: none; border-radius: 999px; padding: 12px 18px; cursor: pointer; font-family: inherit;
     box-shadow: 0 6px 22px rgba(255, 64, 64, 0.45);
 }
 .jump-pill:active { transform: translateX(-50%) scale(0.96); }
@@ -99,6 +99,7 @@ body {
     border-top: 1px solid #181d24; background: #0d1015;
     padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
 }
+.audience-badge { color: #8b93a3; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 0 6px 8px; }
 .relay-note { color: #ffb020; font-size: 12.5px; padding: 2px 4px 8px; display: none; }
 .relay-note.show { display: block; }
 .compose-row { display: flex; gap: 9px; align-items: flex-end; }
@@ -142,9 +143,9 @@ body {
 .pick-card:hover .pick-chev { color: #ff4040; }
 .pick-back {
     background: #14181f; border: 1px solid #262c36; border-radius: 999px; color: #aab1bd;
-    font-size: 12px; font-weight: 600; padding: 4px 12px; cursor: pointer; font-family: inherit;
+    font-size: 12px; font-weight: 600; padding: 4px 14px; cursor: pointer; font-family: inherit;
     vertical-align: middle; margin-left: 10px; text-transform: none; letter-spacing: 0.02em;
-    text-shadow: none;
+    text-shadow: none; min-height: 44px; display: inline-flex; align-items: center;
 }
 .pick-back:hover { border-color: #ff4040; color: #ff6b6b; }
 @media (max-width: 480px) {
@@ -203,6 +204,7 @@ body {
         <div class="wire-feed" id="feed"></div>
         <button class="jump-pill" id="jumpPill" style="display:none">&darr; new messages</button>
         <div class="wire-compose">
+            <div class="audience-badge" id="audienceBadge"></div>
             <div class="relay-note" id="relayNote"></div>
             <div class="compose-row">
                 <textarea class="compose-input" id="composeInput" placeholder="Message directly&hellip;" rows="1"></textarea>
@@ -297,6 +299,8 @@ body {
     var statusText = document.getElementById('statusText');
     var statusDot = document.getElementById('statusDot');
     var jumpEl = document.getElementById('jumpPill');
+    var roomKey = (function () { try { return new URLSearchParams(location.search).get('wire') || 'room'; } catch (e) { return 'room'; } })();
+    function saveDraft(v) { try { localStorage.setItem('draft-' + roomKey, v); } catch (e) {} }
 
     function el(tag, cls, text) {
         var n = document.createElement(tag);
@@ -495,29 +499,33 @@ body {
         messages.push(echo);
         input.value = '';
         input.rows = 1;
+        saveDraft('');
         relayNote.className = 'relay-note';
         stick = true;
         render();
-        var remaining = SENDS.length, okAny = false, failedAny = false;
+        var remaining = SENDS.length, okAny = false, failedAny = false, okCount = 0, failCount = 0;
         SENDS.forEach(function (snd) {
             fetch(snd.url, { method: 'POST', body: snd.authLine + '\n' + body, keepalive: true }).then(function (res) {
                 if (!res.ok) throw new Error('intake rejected');
+                okCount++;
                 if (!okAny) { okAny = true; if (echo.pending && !echo.delivered) { echo.pending = false; render(); } }
-            }).catch(function () { failedAny = true; }).then(function () {
+                if (SENDS.length > 1 && remaining > 1) { relayNote.textContent = 'Sent to ' + okCount + ' of ' + SENDS.length + ' wires\u2026'; relayNote.className = 'relay-note show'; }
+            }).catch(function () { failedAny = true; failCount++; }).then(function () {
                 if (--remaining > 0) return;
                 sending = false;
-                if (!failedAny) { echo.pending = false; render(); return; }
+                if (!failedAny) { echo.pending = false; relayNote.className = 'relay-note'; render(); return; }
                 if (!okAny) {
                     if (!echo.delivered) {
                         for (var i = messages.length - 1; i >= 0; i--) {
                             if (messages[i].id === echo.id) { messages.splice(i, 1); break; }
                         }
                         input.value = body;
+                    saveDraft(body);
                     }
                     relayNote.textContent = 'That did not send - your text is back in the box, try again.';
                 } else {
                     echo.pending = false;
-                    relayNote.textContent = 'Reached only one wire - check the room before resending.';
+                    relayNote.textContent = 'Reached ' + okCount + ' of ' + SENDS.length + ' wires - check the rooms before resending.';
                 }
                 relayNote.className = 'relay-note show';
                 render();
@@ -525,12 +533,20 @@ body {
         });
     }
 
+    input.addEventListener('focus', function () { setTimeout(function () { try { input.scrollIntoView({ block: 'nearest' }); } catch (e) {} }, 250); });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', function () {
+            var off = Math.max(0, window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop);
+            document.getElementById('wireShell').style.marginBottom = off > 0 ? off + 'px' : '';
+        });
+    }
     sendBtn.addEventListener('click', send);
     input.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
     input.addEventListener('input', function () {
         input.rows = Math.min(6, Math.max(1, input.value.split('\n').length));
+        saveDraft(input.value);
     });
 
     var storyToggle = document.getElementById('storyToggle');
@@ -543,6 +559,7 @@ body {
         storyToggle.setAttribute('aria-expanded', open ? 'false' : 'true');
     });
 
+    try { var d0 = localStorage.getItem('draft-' + roomKey); if (d0) { input.value = d0; input.rows = Math.min(6, Math.max(1, d0.split('\n').length)); } } catch (e) {}
     render();
     crumb('mounted');
     for (var b = 0; b < RECVS.length; b++) tick(RECVS[b]);
@@ -609,6 +626,8 @@ body {
     introLine.textContent = cfg.intro;
     closing.textContent = cfg.closing;
     document.getElementById('composeInput').placeholder = cfg.placeholder;
+    var aud = key === 'group' ? 'Sending as NIKO \u2192 ALL THREE WIRES' : ('Sending as NIKO \u2192 ' + cfg.peerLabel);
+    document.getElementById('audienceBadge').textContent = aud;
     if (!cfg.story) story.style.display = 'none';
     document.title = key === 'group' ? 'The Wire - the group room' : ('The Wire - Niko × ' + (key === 'chunkz' ? 'Chunkz' : (key === 'cinar' ? 'Çınar' : 'Yashlin')));
     bootWire(cfg);
