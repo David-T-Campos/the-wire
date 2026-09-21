@@ -448,7 +448,7 @@ body {
             var buf = '';
             function pump() {
                 reader.read().then(function (r) {
-                    if (r.done) { recv.streamActive = false; setTimeout(function () { stream(recv); }, 2000); return; }
+                    if (r.done) { recv.streamActive = false; setTimeout(function () { stream(recv); }, 1000); return; }
                     if (!recv.streamOpened) { recv.streamOpened = true; recv.streamFails = 0; crumb('stream-ok'); }
                     buf += decoder.decode(r.value, { stream: true });
                     var idx;
@@ -458,13 +458,13 @@ body {
                         processLines([line], recv);
                     }
                     pump();
-                }).catch(function () { recv.streamActive = false; setTimeout(function () { stream(recv); }, 3000); });
+                }).catch(function () { recv.streamActive = false; setTimeout(function () { stream(recv); }, 2000); });
             }
             pump();
         }).catch(function () {
             recv.streamActive = false;
             recv.streamFails++;
-            setTimeout(function () { stream(recv); }, Math.min(15000, 2000 * recv.streamFails));
+            setTimeout(function () { stream(recv); }, Math.min(8000, 1500 * recv.streamFails));
         });
     }
     var ri;
@@ -485,6 +485,7 @@ body {
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) { for (var v = 0; v < RECVS.length; v++) { tick(RECVS[v]); stream(RECVS[v]); } }
     });
+    window.addEventListener('online', function () { for (var v2 = 0; v2 < RECVS.length; v2++) { tick(RECVS[v2]); stream(RECVS[v2]); } });
 
     function send() {
         var body = input.value.replace(/\s+$/, '');
@@ -499,9 +500,9 @@ body {
         render();
         var remaining = SENDS.length, okAny = false, failedAny = false;
         SENDS.forEach(function (snd) {
-            fetch(snd.url, { method: 'POST', body: snd.authLine + '\n' + body }).then(function (res) {
+            fetch(snd.url, { method: 'POST', body: snd.authLine + '\n' + body, keepalive: true }).then(function (res) {
                 if (!res.ok) throw new Error('intake rejected');
-                okAny = true;
+                if (!okAny) { okAny = true; if (echo.pending && !echo.delivered) { echo.pending = false; render(); } }
             }).catch(function () { failedAny = true; }).then(function () {
                 if (--remaining > 0) return;
                 sending = false;
